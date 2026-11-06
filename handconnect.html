@@ -1,0 +1,892 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>HandConnect AI</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #050510;
+      color: #00ffff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding-bottom: 30px;
+    }
+
+    h1 {
+      margin: 20px;
+      font-size: 32px;
+      text-shadow: 0 0 15px cyan;
+    }
+
+    .dashboard {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin: 20px;
+    }
+
+    .panel {
+      background: #101020;
+      border: 1px solid #00ffff;
+      border-radius: 12px;
+      padding: 15px 25px;
+      min-width: 160px;
+      box-shadow: 0 0 12px rgba(0, 255, 255, 0.2);
+    }
+
+    .panel h3 {
+      color: #00ffff;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+
+    .panel p {
+      color: white;
+      font-size: 20px;
+    }
+
+    #history {
+      font-size: 14px;
+      line-height: 1.8;
+      color: #ff00ff;
+    }
+
+    #container {
+      position: relative;
+      width: 90vw;
+      max-width: 900px;
+      margin: 20px auto;
+    }
+
+    video {
+      width: 100%;
+      display: block;
+      border-radius: 15px;
+      transform: scaleX(-1);
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    button {
+      margin: 15px;
+      padding: 12px 25px;
+      background: #00ffff;
+      color: #050510;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    button:hover {
+      background: #ff00ff;
+      box-shadow: 0 0 15px #ff00ff;
+    }
+
+    #startButton.stop {
+      background: #ff00ff;
+      color: white;
+    }
+    #recordButton {
+      background: #ff00ff;
+      color: white;
+}
+
+    #recordButton.recording {
+       background: #ff3333;
+}
+  </style>
+</head>
+
+<body>
+
+  <h1>✨ HandConnect AI ✨</h1>
+
+  <!-- Dashboard -->
+
+  <div class="dashboard">
+
+    <div class="panel">
+      <h3>Camera Status</h3>
+      <p id="status">Offline</p>
+    </div>
+
+    <div class="panel">
+      <h3>Hands Detected</h3>
+      <p id="handCount">0</p>
+    </div>
+
+    <div class="panel">
+      <h3>Current Gesture</h3>
+      <p id="gesture">Waiting...</p>
+    </div>
+
+    <div class="panel">
+      <h3>FPS</h3>
+      <p id="fps">0</p>
+    </div>
+
+    <div class="panel">
+      <h3>Gesture History</h3>
+      <p id="history">Waiting...</p>
+    </div>
+
+  </div>
+
+  <!-- Camera -->
+
+  <div id="container">
+
+    <video id="video" autoplay playsinline></video>
+
+    <canvas id="canvas"></canvas>
+
+  </div>
+
+  <button id="startButton">Start Camera</button>
+  <button id="recordButton">Start Recording</button>
+  <script>
+
+    // =====================================
+    // BASIC SETUP
+    // =====================================
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const status = document.getElementById("status");
+    const handCount = document.getElementById("handCount");
+    const gestureText = document.getElementById("gesture");
+    const fpsDisplay = document.getElementById("fps");
+    const historyDisplay = document.getElementById("history");
+    const startButton = document.getElementById("startButton");
+
+    let cameraStarted = false;
+    let camera = null;
+
+    // FPS variables
+
+    let frameCount = 0;
+    let lastTime = performance.now();
+
+    // Gesture history
+
+    let gestureHistory = [];
+
+    // =====================================
+    // SPARK PARTICLES
+    // =====================================
+
+    const sparks = [];
+
+    function createSparks(x, y) {
+
+      // Limit particles for better performance
+
+      if (sparks.length > 100) return;
+
+      sparks.push({
+
+        x: x,
+        y: y,
+
+        vx: (Math.random() - 0.5) * 3,
+        vy: (Math.random() - 0.5) * 3,
+
+        life: 1
+
+      });
+
+    }
+
+    function drawSparks() {
+
+      for (let i = sparks.length - 1; i >= 0; i--) {
+
+        const s = sparks[i];
+
+        s.x += s.vx;
+        s.y += s.vy;
+
+        s.life -= 0.025;
+
+        ctx.globalAlpha = Math.max(s.life, 0);
+
+        ctx.fillStyle = "#00ffff";
+
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = "#00ffff";
+
+        ctx.beginPath();
+
+        ctx.arc(
+          s.x,
+          s.y,
+          3,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fill();
+
+        if (s.life <= 0) {
+
+          sparks.splice(i, 1);
+
+        }
+
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+
+    }
+
+    // =====================================
+    // NEON LINE DRAWING
+    // =====================================
+
+    function glowLine(x1, y1, x2, y2, color = "#00ffff") {
+
+      ctx.beginPath();
+
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+
+      ctx.strokeStyle = color;
+
+      ctx.lineWidth = 3;
+
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = color;
+
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+
+    }
+
+    // =====================================
+    // HAND SKELETON CONNECTIONS
+    // =====================================
+
+    const connections = [
+
+      [0,1],[1,2],[2,3],[3,4],
+
+      [0,5],[5,6],[6,7],[7,8],
+
+      [5,9],[9,10],[10,11],[11,12],
+
+      [9,13],[13,14],[14,15],[15,16],
+
+      [13,17],[17,18],[18,19],[19,20],
+
+      [0,17]
+
+    ];
+
+    const fingertips = [4,8,12,16,20];
+
+    // =====================================
+    // GESTURE DETECTION
+    // =====================================
+
+    function detectGesture(landmarks) {
+
+      const tips = [8,12,16,20];
+
+      const bases = [6,10,14,18];
+
+      let extended = 0;
+
+      for (let i = 0; i < tips.length; i++) {
+
+        if (
+          landmarks[tips[i]].y <
+          landmarks[bases[i]].y
+        ) {
+
+          extended++;
+
+        }
+
+      }
+
+      const thumb = landmarks[4];
+
+      const indexFinger = landmarks[8];
+
+      const distance = Math.hypot(
+
+        thumb.x - indexFinger.x,
+
+        thumb.y - indexFinger.y
+
+      );
+
+      if (distance < 0.05) return "Pinch 👌";
+
+      if (extended === 4) return "Open Hand ✋";
+
+      if (extended === 0) return "Fist ✊";
+
+      if (extended === 1) return "Pointing ☝️";
+
+      return "Hand Detected";
+
+    }
+
+    // =====================================
+    // MEDIAPIPE RESULTS
+    // =====================================
+
+    function onResults(results) {
+
+      if (!cameraStarted) return;
+
+      // Resize canvas only when needed
+
+      if (
+        canvas.width !== video.videoWidth ||
+        canvas.height !== video.videoHeight
+      ) {
+
+        canvas.width = video.videoWidth;
+
+        canvas.height = video.videoHeight;
+
+      }
+
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      // FPS calculation
+
+      frameCount++;
+
+      const currentTime = performance.now();
+
+      if (currentTime - lastTime >= 1000) {
+
+        fpsDisplay.textContent = frameCount;
+
+        frameCount = 0;
+
+        lastTime = currentTime;
+
+      }
+
+      const hands = results.multiHandLandmarks;
+
+      // No hand detected
+
+      if (!hands || hands.length === 0) {
+
+        handCount.textContent = "0";
+
+        gestureText.textContent = "Waiting...";
+
+        drawSparks();
+
+        return;
+
+      }
+
+      handCount.textContent = hands.length;
+
+      // Process detected hands
+
+      hands.forEach(landmarks => {
+
+        // Draw skeleton
+
+        connections.forEach(([start, end]) => {
+
+          const p1 = landmarks[start];
+
+          const p2 = landmarks[end];
+
+          glowLine(
+
+            p1.x * canvas.width,
+
+            p1.y * canvas.height,
+
+            p2.x * canvas.width,
+
+            p2.y * canvas.height
+
+          );
+
+        });
+
+        // Draw landmark dots
+
+        landmarks.forEach((point, index) => {
+
+          const x = point.x * canvas.width;
+
+          const y = point.y * canvas.height;
+
+          ctx.beginPath();
+
+          ctx.arc(
+
+            x,
+
+            y,
+
+            fingertips.includes(index) ? 6 : 3,
+
+            0,
+
+            Math.PI * 2
+
+          );
+
+          ctx.fillStyle =
+
+            fingertips.includes(index)
+
+              ? "#ff00ff"
+
+              : "#00ffff";
+
+          ctx.shadowBlur = 12;
+
+          ctx.shadowColor = ctx.fillStyle;
+
+          ctx.fill();
+
+          ctx.shadowBlur = 0;
+
+        });
+
+        // Detect pinch
+
+        const thumb = landmarks[4];
+
+        const indexFinger = landmarks[8];
+
+        const distance = Math.hypot(
+
+          thumb.x - indexFinger.x,
+
+          thumb.y - indexFinger.y
+
+        );
+
+        const isPinching = distance < 0.05;
+
+        // Sparks only during pinch
+
+        if (isPinching) {
+
+          [4, 8].forEach(index => {
+
+            const point = landmarks[index];
+
+            createSparks(
+
+              point.x * canvas.width,
+
+              point.y * canvas.height
+
+            );
+
+          });
+
+        }
+
+        // Gesture recognition
+
+        const currentGesture = detectGesture(landmarks);
+
+        gestureText.textContent = currentGesture;
+
+        // Update gesture history
+
+        if (
+
+          gestureHistory.length === 0 ||
+
+          gestureHistory[gestureHistory.length - 1] !== currentGesture
+
+        ) {
+
+          gestureHistory.push(currentGesture);
+
+          if (gestureHistory.length > 5) {
+
+            gestureHistory.shift();
+
+          }
+
+          historyDisplay.innerHTML =
+
+            gestureHistory.join("<br>");
+
+        }
+
+      });
+
+      // Draw sparks
+
+      drawSparks();
+
+      // Two-hand beams
+
+      if (hands.length === 2) {
+
+        const hand1 = hands[0];
+
+        const hand2 = hands[1];
+
+        fingertips.forEach(index => {
+
+          const p1 = hand1[index];
+
+          const p2 = hand2[index];
+
+          glowLine(
+
+            p1.x * canvas.width,
+
+            p1.y * canvas.height,
+
+            p2.x * canvas.width,
+
+            p2.y * canvas.height,
+
+            "#ff00ff"
+
+          );
+
+        });
+
+      }
+
+    }
+
+    // =====================================
+    // MEDIAPIPE INITIALIZATION
+    // =====================================
+
+    const tracker = new Hands({
+
+      locateFile: file =>
+
+        "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + file
+
+    });
+
+    tracker.setOptions({
+
+      maxNumHands: 2,
+
+      modelComplexity: 0,
+
+      minDetectionConfidence: 0.5,
+
+      minTrackingConfidence: 0.5
+
+    });
+
+    tracker.onResults(onResults);
+
+    // =====================================
+    // START / STOP CAMERA
+    // =====================================
+
+    startButton.addEventListener("click", async () => {
+
+      if (!cameraStarted) {
+
+        try {
+
+          status.textContent = "Starting...";
+
+          await tracker.initialize();
+
+          camera = new Camera(video, {
+
+            onFrame: async () => {
+
+              if (cameraStarted) {
+
+                await tracker.send({
+
+                  image: video
+
+                });
+
+              }
+
+            },
+
+            width: 640,
+
+            height: 480
+
+          });
+
+          cameraStarted = true;
+
+          await camera.start();
+
+          startButton.textContent = "Stop Camera";
+
+          startButton.classList.add("stop");
+
+          status.textContent = "Online";
+
+        } catch (error) {
+
+          cameraStarted = false;
+
+          status.textContent = "Camera Error";
+
+          console.error(error);
+
+        }
+
+      } else {
+
+        cameraStarted = false;
+
+        if (camera) {
+
+          camera.stop();
+
+          camera = null;
+
+        }
+
+        if (video.srcObject) {
+
+          video.srcObject.getTracks().forEach(track => {
+
+            track.stop();
+
+          });
+
+          video.srcObject = null;
+
+        }
+
+        ctx.clearRect(
+
+          0,
+
+          0,
+
+          canvas.width,
+
+          canvas.height
+
+        );
+
+        handCount.textContent = "0";
+
+        gestureText.textContent = "Waiting...";
+
+        fpsDisplay.textContent = "0";
+
+        historyDisplay.textContent = "Waiting...";
+
+        gestureHistory = [];
+
+        sparks.length = 0;
+
+        status.textContent = "Offline";
+
+        startButton.textContent = "Start Camera";
+
+        startButton.classList.remove("stop");
+
+      }
+
+    });
+    // =====================================
+// HANDCONNECT RECORDING FEATURE
+// =====================================
+
+const recordButton = document.getElementById("recordButton");
+
+// Canvas used to combine webcam + hand effects
+const recordingCanvas = document.createElement("canvas");
+
+const recordingCtx = recordingCanvas.getContext("2d");
+
+let mediaRecorder = null;
+let recordedChunks = [];
+let recording = false;
+let recordingAnimationId = null;
+
+// Draw webcam and hand tracking together
+function drawRecordingFrame() {
+
+  if (!recording) return;
+
+  if (video.videoWidth && video.videoHeight) {
+
+    recordingCanvas.width = video.videoWidth;
+    recordingCanvas.height = video.videoHeight;
+
+    // Draw webcam video
+    recordingCtx.drawImage(
+      video,
+      0,
+      0,
+      recordingCanvas.width,
+      recordingCanvas.height
+    );
+
+    // Draw hand tracking effects
+    recordingCtx.drawImage(
+      canvas,
+      0,
+      0,
+      recordingCanvas.width,
+      recordingCanvas.height
+    );
+
+  }
+
+  recordingAnimationId =
+    requestAnimationFrame(drawRecordingFrame);
+
+}
+
+// Start and stop recording
+recordButton.addEventListener("click", async () => {
+
+  // STOP RECORDING
+  if (recording) {
+
+    recording = false;
+
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
+
+    cancelAnimationFrame(recordingAnimationId);
+
+    recordButton.textContent = "Start Recording";
+    recordButton.classList.remove("recording");
+
+    return;
+  }
+
+  // Camera must be running
+  if (!cameraStarted) {
+
+    alert("Please start the camera first!");
+
+    return;
+
+  }
+
+  try {
+
+    recordedChunks = [];
+
+    const recordingStream =
+      recordingCanvas.captureStream(30);
+
+    // Choose supported recording format
+    const mimeType = MediaRecorder.isTypeSupported(
+      "video/webm;codecs=vp9"
+    )
+      ? "video/webm;codecs=vp9"
+      : "video/webm";
+
+    mediaRecorder = new MediaRecorder(
+      recordingStream,
+      { mimeType }
+    );
+
+    mediaRecorder.ondataavailable = event => {
+
+      if (event.data.size > 0) {
+        recordedChunks.push(event.data);
+      }
+
+    };
+
+    mediaRecorder.onstop = () => {
+
+      const blob = new Blob(
+        recordedChunks,
+        { type: "video/webm" }
+      );
+
+      const videoURL = URL.createObjectURL(blob);
+
+      const downloadLink = document.createElement("a");
+
+      downloadLink.href = videoURL;
+      downloadLink.download = "HandConnect-Recording.webm";
+
+      downloadLink.click();
+
+      setTimeout(() => {
+        URL.revokeObjectURL(videoURL);
+      }, 1000);
+
+      alert("Your HandConnect recording is downloaded!");
+
+    };
+
+    recording = true;
+
+    drawRecordingFrame();
+
+    mediaRecorder.start();
+
+    recordButton.textContent = "Stop Recording";
+    recordButton.classList.add("recording");
+
+  } catch (error) {
+
+    console.error("Recording error:", error);
+
+    alert("Recording could not start. Check your browser.");
+
+  }
+
+});
+
+  </script>
+
+</body>
+</html>
